@@ -203,25 +203,27 @@ def main(unused_argv):
       sync_init_op = opt.get_init_tokens_op()
 
     init_op = tf.global_variables_initializer()
+    loc_init_op = tf.global_variables_initializer()
     train_dir = tempfile.mkdtemp()
     #Graph end here
     
     if FLAGS.sync_replicas:
       sv = tf.train.Supervisor(
-          is_chief=is_chief,
-          logdir=train_dir,
-          init_op=init_op,
-          local_init_op=local_init_op,
-          ready_for_local_init_op=ready_for_local_init_op,
-          recovery_wait_secs=1)
-          #global_step=global_step)
+        is_chief=is_chief,
+        logdir=train_dir,
+        init_op=init_op,
+        local_init_op=local_init_op,
+        ready_for_local_init_op=ready_for_local_init_op,
+        recovery_wait_secs=1)
+        #global_step=global_step)
     else:
       sv = tf.train.Supervisor(
-          is_chief=is_chief,
-          logdir=train_dir,
-          init_op=init_op,
-          recovery_wait_secs=1)
-          #global_step=global_step)
+        is_chief=is_chief,
+        logdir=train_dir,
+        init_op=init_op,
+        #local_init_op=local_init_op,
+        recovery_wait_secs=1)
+        #global_step=global_step)
 
     sess_config = tf.ConfigProto(
         allow_soft_placement=True,
