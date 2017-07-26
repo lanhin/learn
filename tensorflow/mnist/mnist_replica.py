@@ -136,11 +136,12 @@ def main(unused_argv):
   # The device setter will automatically place Variables ops on separate
   # parameter servers (ps). The non-Variable ops will be placed on the workers.
   # The ps use CPU and workers use corresponding GPU
-  with tf.device(
-      tf.train.replica_device_setter(
-          worker_device=worker_device,
-          ps_device="/job:ps/cpu:0",
-          cluster=cluster)):
+#  with tf.device(
+#      tf.train.replica_device_setter(
+#          worker_device=worker_device,
+#          ps_device="/job:ps/cpu:0",
+#          cluster=cluster)):
+  with tf.device("job:worker/task:%d" % FLAGS.task_index):
 #    global_step = tf.Variable(0, name="global_step", trainable=False)
 
     # Variables of the hidden layer
@@ -171,11 +172,11 @@ def main(unused_argv):
 
     opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
 
-  with tf.device(
-      tf.train.replica_device_setter(
-          worker_device=worker_device,
-          ps_device="/job:ps/cpu:0",
-          cluster=cluster)):
+#  with tf.device(
+#      tf.train.replica_device_setter(
+#          worker_device=worker_device,
+#          ps_device="/job:ps/cpu:0",
+#          cluster=cluster)):
     if FLAGS.sync_replicas:
       if FLAGS.replicas_to_aggregate is None:
         replicas_to_aggregate = num_workers
@@ -221,7 +222,7 @@ def main(unused_argv):
         is_chief=is_chief,
         logdir=train_dir,
         init_op=init_op,
-        #local_init_op=local_init_op,
+        local_init_op=loc_init_op,
         recovery_wait_secs=1)
         #global_step=global_step)
 
