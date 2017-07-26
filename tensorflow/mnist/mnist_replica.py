@@ -56,7 +56,7 @@ flags.DEFINE_integer("task_index", None,
                      "Worker task index, should be >= 0. task_index=0 is "
                      "the master worker task the performs the variable "
                      "initialization ")
-flags.DEFINE_integer("num_gpus", 1,
+flags.DEFINE_integer("num_gpus", 0,
                      "Total number of gpus for each machine."
                      "If you don't use GPU, please set it to '0'")
 flags.DEFINE_integer("replicas_to_aggregate", None,
@@ -170,7 +170,13 @@ def main(unused_argv):
     cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
 
     opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
+#Graph end here
 
+  with tf.device(
+      tf.train.replica_device_setter(
+          worker_device=worker_device,
+          ps_device="/job:ps/cpu:0",
+          cluster=cluster)):
     if FLAGS.sync_replicas:
       if FLAGS.replicas_to_aggregate is None:
         replicas_to_aggregate = num_workers
