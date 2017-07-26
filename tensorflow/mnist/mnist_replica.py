@@ -141,7 +141,7 @@ def main(unused_argv):
           worker_device=worker_device,
           ps_device="/job:ps/cpu:0",
           cluster=cluster)):
-    global_step = tf.Variable(0, name="global_step", trainable=False)
+#    global_step = tf.Variable(0, name="global_step", trainable=False)
 
     # Variables of the hidden layer
     hid_w = tf.Variable(
@@ -170,7 +170,6 @@ def main(unused_argv):
     cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
 
     opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
-#Graph end here
 
   with tf.device(
       tf.train.replica_device_setter(
@@ -189,7 +188,8 @@ def main(unused_argv):
           total_num_replicas=num_workers,
           name="mnist_sync_replicas")
 
-    train_step = opt.minimize(cross_entropy, global_step=global_step)
+#    train_step = opt.minimize(cross_entropy, global_step=global_step)
+    train_step = opt.minimize(cross_entropy)
 
     if FLAGS.sync_replicas:
       local_init_op = opt.local_step_init_op
@@ -204,7 +204,8 @@ def main(unused_argv):
 
     init_op = tf.global_variables_initializer()
     train_dir = tempfile.mkdtemp()
-
+    #Graph end here
+    
     if FLAGS.sync_replicas:
       sv = tf.train.Supervisor(
           is_chief=is_chief,
@@ -212,15 +213,15 @@ def main(unused_argv):
           init_op=init_op,
           local_init_op=local_init_op,
           ready_for_local_init_op=ready_for_local_init_op,
-          recovery_wait_secs=1,
-          global_step=global_step)
+          recovery_wait_secs=1)
+          #global_step=global_step)
     else:
       sv = tf.train.Supervisor(
           is_chief=is_chief,
           logdir=train_dir,
           init_op=init_op,
-          recovery_wait_secs=1,
-          global_step=global_step)
+          recovery_wait_secs=1)
+          #global_step=global_step)
 
     sess_config = tf.ConfigProto(
         allow_soft_placement=True,
@@ -261,14 +262,14 @@ def main(unused_argv):
       batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size)
       train_feed = {x: batch_xs, y_: batch_ys}
 
-      _, step = sess.run([train_step, global_step], feed_dict=train_feed)
+      sess.run(train_step, feed_dict=train_feed)
       local_step += 1
 
       now = time.time()
-      print("%f: Worker %d: training step %d done (global step: %d)" %
-            (now, FLAGS.task_index, local_step, step))
+      print("%f: Worker %d: training step %d done" %
+            (now, FLAGS.task_index, local_step))
 
-      if step >= FLAGS.train_steps:
+      if local_step >= FLAGS.train_steps:
         break
 
     time_end = time.time()
