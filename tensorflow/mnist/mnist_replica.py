@@ -61,7 +61,7 @@ flags.DEFINE_integer("num_gpus", 0,
                      "If you don't use GPU, please set it to '0'")
 flags.DEFINE_integer("hidden_units", 100,
                      "Number of units in the hidden layer of the NN")
-flags.DEFINE_integer("train_steps", 200,
+flags.DEFINE_integer("train_steps", 1000,
                      "Number of (global) training steps to perform")
 flags.DEFINE_integer("batch_size", 100, "Training batch size")
 flags.DEFINE_float("learning_rate", 0.01, "Learning rate")
@@ -76,6 +76,8 @@ FLAGS = flags.FLAGS
 
 IMAGE_PIXELS = 28
 
+alpha = 0.1
+tau = 1600
 
 def main(unused_argv):
   mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot=True)
@@ -166,11 +168,51 @@ def main(unused_argv):
 #    train_step = opt.minimize(cross_entropy, global_step=global_step)
     train_step = opt.minimize(cross_entropy)
 
-    init_op = tf.global_variables_initializer()
     loc_init_op = tf.global_variables_initializer()
     train_dir = tempfile.mkdtemp()
     #Graph end here
+
+    with tf.device("/job:ps/replica:0/task:0/cpu:0"):
+          # Variables of the hidden layer
+      glo_hid_w = tf.Variable(
+        tf.truncated_normal(
+          [IMAGE_PIXELS * IMAGE_PIXELS, FLAGS.hidden_units],
+          stddev=1.0 / IMAGE_PIXELS),
+        name="glo_hid_w")
+      glo_hid_b = tf.Variable(tf.zeros([FLAGS.hidden_units]), name="glo_hid_b")
+
+      # Variables of the softmax layer
+      glo_sm_w = tf.Variable(
+        tf.truncated_normal(
+          [FLAGS.hidden_units, 10],
+          stddev=1.0 / math.sqrt(FLAGS.hidden_units)),
+        name="glo_sm_w")
+      glo_sm_b = tf.Variable(tf.zeros([10]), name="glo_sm_b")
+
+    def update_before_train(alpha, w, global_w):
+      varib = alpha*(w-global_w)
+      gvar_op = global_w.assign(global_w + varib)
+      return gvar_op, varib
+      
+    def update_after_train(w, vab):
+      return w.assign(w-vab)
+
+    before_op_tuple_list = []
+    after_op_tuple_list = []
+    before_op_tuple_list.append((update_before_train(alpha, hid_w, glo_hid_w)))
+    before_op_tuple_list.append((update_before_train(alpha, hid_b, glo_hid_b)))
+    before_op_tuple_list.append((update_before_train(alpha, sm_w, glo_sm_w)))
+    before_op_tuple_list.append((update_before_train(alpha, sm_b, glo_sm_b)))
+    vbhw = tf.placeholder("float", [IMAGE_PIXELS * IMAGE_PIXELS, FLAGS.hidden_units])
+    after_op_tuple_list.append((update_after_train(hid_w, vbhw), vbhw))
+    vbhb = tf.placeholder("float", [FLAGS.hidden_units])
+    after_op_tuple_list.append((update_after_train(hid_b, vbhb), vbhb))
+    vbsw = tf.placeholder("float", [FLAGS.hidden_units, 10])
+    after_op_tuple_list.append((update_after_train(sm_w, vbsw), vbsw))
+    vbsb = tf.placeholder("float", [10])
+    after_op_tuple_list.append((update_after_train(sm_b, vbsb), vbsb))
     
+    init_op = tf.global_variables_initializer()
 
     sv = tf.train.Supervisor(
       is_chief=is_chief,
@@ -197,7 +239,6 @@ def main(unused_argv):
 
     print("Worker %d: Session initialization complete." % FLAGS.task_index)
 
-
     # Perform training
     time_begin = time.time()
     print("Training begins @ %f" % time_begin)
@@ -207,8 +248,22 @@ def main(unused_argv):
       # Training feed
       batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size)
       train_feed = {x: batch_xs, y_: batch_ys}
+      if local_step % tau == 0:
+        print ("Update weights...")
+        thevarib_list = []
+        for i in range(0, len(before_op_tuple_list)):
+          (gvar_op, varib) = before_op_tuple_list[i]
+          _, thevarib = sess.run([gvar_op, varib])
+          thevarib_list.append(thevarib)
 
-      sess.run(train_step, feed_dict=train_feed)
+        sess.run(train_step, feed_dict=train_feed)
+
+        for i in range(0, len(after_op_tuple_list)):
+          (lvar_op, thevaribHolder) = after_op_tuple_list[i]
+          sess.run(lvar_op, feed_dict={thevaribHolder: thevarib_list[i]})
+
+      else:
+          sess.run(train_step, feed_dict=train_feed)
       local_step += 1
 
       now = time.time()
