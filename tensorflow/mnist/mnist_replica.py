@@ -41,6 +41,7 @@ import math
 import sys
 import tempfile
 import time
+import numpy
 
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
@@ -77,7 +78,7 @@ FLAGS = flags.FLAGS
 IMAGE_PIXELS = 28
 
 alpha = 0.1
-tau = 1600
+tau = 1
 
 def main(unused_argv):
   mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot=True)
@@ -157,7 +158,8 @@ def main(unused_argv):
     y = tf.nn.softmax(tf.nn.xw_plus_b(hid, sm_w, sm_b))
     cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
 
-    opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
+#    opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
+    opt = tf.train.GradientDescentOptimizer(FLAGS.learning_rate)
 
 #  with tf.device(
 #      tf.train.replica_device_setter(
@@ -279,8 +281,20 @@ def main(unused_argv):
     print("Training elapsed time: %f s" % training_time)
 
     # Validation feed
+    def error_rate(predictions, labels):
+      """Return the error rate based on dense predictions and sparse labels."""
+      numpy.set_printoptions(threshold=10)
+      print ('prediction:',numpy.argmax(predictions, 1))
+      print ('labels:', numpy.argmax(labels, 1))
+      return 100.0 - (
+        100.0 *
+        numpy.sum(numpy.argmax(predictions, 1) == numpy.argmax(labels, 1)) /
+        predictions.shape[0])
+
     val_feed = {x: mnist.validation.images, y_: mnist.validation.labels}
     val_xent = sess.run(cross_entropy, feed_dict=val_feed)
+    prediction = sess.run(y, feed_dict=val_feed)
+    print('Minibatch error: %.1f%%' % error_rate(prediction, mnist.validation.labels))
     print("After %d training step(s), validation cross entropy = %g" %
           (FLAGS.train_steps, val_xent))
 
