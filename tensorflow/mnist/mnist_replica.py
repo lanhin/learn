@@ -59,25 +59,12 @@ flags.DEFINE_integer("task_index", None,
 flags.DEFINE_integer("num_gpus", 0,
                      "Total number of gpus for each machine."
                      "If you don't use GPU, please set it to '0'")
-flags.DEFINE_integer("replicas_to_aggregate", None,
-                     "Number of replicas to aggregate before parameter update"
-                     "is applied (For sync_replicas mode only; default: "
-                     "num_workers)")
 flags.DEFINE_integer("hidden_units", 100,
                      "Number of units in the hidden layer of the NN")
 flags.DEFINE_integer("train_steps", 200,
                      "Number of (global) training steps to perform")
 flags.DEFINE_integer("batch_size", 100, "Training batch size")
 flags.DEFINE_float("learning_rate", 0.01, "Learning rate")
-flags.DEFINE_boolean("sync_replicas", False,
-                     "Use the sync_replicas (synchronized replicas) mode, "
-                     "wherein the parameter updates from workers are aggregated "
-                     "before applied to avoid stale gradients")
-flags.DEFINE_boolean(
-    "existing_servers", False, "Whether servers already exists. If True, "
-    "will use the worker hosts via their GRPC URLs (one client process "
-    "per worker host). Otherwise, will create an in-process TensorFlow "
-    "server.")
 flags.DEFINE_string("ps_hosts","localhost:2222",
                     "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", "localhost:2223,localhost:2224",
@@ -114,12 +101,10 @@ def main(unused_argv):
       "ps": ps_spec,
       "worker": worker_spec})
 
-  if not FLAGS.existing_servers:
-    # Not using existing servers. Create an in-process server.
-    server = tf.train.Server(
-        cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
-    if FLAGS.job_name == "ps":
-      server.join()
+  server = tf.train.Server(
+    cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
+  if FLAGS.job_name == "ps":
+    server.join()
 
   is_chief = (FLAGS.task_index == 0)
   if FLAGS.num_gpus > 0:
@@ -177,54 +162,23 @@ def main(unused_argv):
 #          worker_device=worker_device,
 #          ps_device="/job:ps/cpu:0",
 #          cluster=cluster)):
-    if FLAGS.sync_replicas:
-      if FLAGS.replicas_to_aggregate is None:
-        replicas_to_aggregate = num_workers
-      else:
-        replicas_to_aggregate = FLAGS.replicas_to_aggregate
-
-      opt = tf.train.SyncReplicasOptimizer(
-          opt,
-          replicas_to_aggregate=replicas_to_aggregate,
-          total_num_replicas=num_workers,
-          name="mnist_sync_replicas")
 
 #    train_step = opt.minimize(cross_entropy, global_step=global_step)
     train_step = opt.minimize(cross_entropy)
-
-    if FLAGS.sync_replicas:
-      local_init_op = opt.local_step_init_op
-      if is_chief:
-        local_init_op = opt.chief_init_op
-
-      ready_for_local_init_op = opt.ready_for_local_init_op
-
-      # Initial token and chief queue runners required by the sync_replicas mode
-      chief_queue_runner = opt.get_chief_queue_runner()
-      sync_init_op = opt.get_init_tokens_op()
 
     init_op = tf.global_variables_initializer()
     loc_init_op = tf.global_variables_initializer()
     train_dir = tempfile.mkdtemp()
     #Graph end here
     
-    if FLAGS.sync_replicas:
-      sv = tf.train.Supervisor(
-        is_chief=is_chief,
-        logdir=train_dir,
-        init_op=init_op,
-        local_init_op=local_init_op,
-        ready_for_local_init_op=ready_for_local_init_op,
-        recovery_wait_secs=1)
-        #global_step=global_step)
-    else:
-      sv = tf.train.Supervisor(
-        is_chief=is_chief,
-        logdir=train_dir,
-        init_op=init_op,
-        local_init_op=loc_init_op,
-        recovery_wait_secs=1)
-        #global_step=global_step)
+
+    sv = tf.train.Supervisor(
+      is_chief=is_chief,
+      logdir=train_dir,
+      init_op=init_op,
+      local_init_op=loc_init_op,
+      recovery_wait_secs=1)
+    #global_step=global_step)
 
     sess_config = tf.ConfigProto(
         allow_soft_placement=True,
@@ -239,21 +193,10 @@ def main(unused_argv):
       print("Worker %d: Waiting for session to be initialized..." %
             FLAGS.task_index)
 
-    if FLAGS.existing_servers:
-      server_grpc_url = "grpc://" + worker_spec[FLAGS.task_index]
-      print("Using existing server at: %s" % server_grpc_url)
-
-      sess = sv.prepare_or_wait_for_session(server_grpc_url,
-                                            config=sess_config)
-    else:
-      sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
+    sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
 
     print("Worker %d: Session initialization complete." % FLAGS.task_index)
 
-    if FLAGS.sync_replicas and is_chief:
-      # Chief worker will start the chief queue runner and call the init op.
-      sess.run(sync_init_op)
-      sv.start_queue_runners(sess, [chief_queue_runner])
 
     # Perform training
     time_begin = time.time()
