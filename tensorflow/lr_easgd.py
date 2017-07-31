@@ -48,8 +48,6 @@ def main(_):
   #      ps_device="/job:ps/cpu:0",
    #     cluster=cluster)):
      with tf.device("job:worker/task:%d" % FLAGS.task_index):
-#    with tf.device("job:worker/replica:0/task:%d" % FLAGS.task_index):
-      #global_step = tf.Variable(0, name="global_step", trainable=False)
       # Build model...
 
       #Prepare data
@@ -62,9 +60,6 @@ def main(_):
       w = tf.Variable(0.0, name = 'weights')
       y_ = model(X, w)
       loss = tf.square(Y - y_)
-
-#      train_op = tf.train.AdagradOptimizer(0.01).minimize(
-#          loss, global_step=global_step)
 
       train_op = tf.train.GradientDescentOptimizer(0.01).minimize(
           loss)
@@ -83,31 +78,27 @@ def main(_):
       lvar = w.assign(w-vab)
       gvar_op = global_w.assign(global_w + varib)
       
-#      saver = tf.train.Saver()
-#      summary_op = tf.summary.merge_all()
       init_op = tf.global_variables_initializer()
 
       # Create a "supervisor", which oversees the training process.
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
                                logdir="/tmp/train_logs",
-#                               saver=None,
                                init_op=init_op,
-                               local_init_op=loc_init_op)
-                               #global_step=global_step,
-                               #save_model_secs=600)
+                               local_init_op=loc_init_op,
+                               recovery_wait_secs=1)
 
       sess_config = tf.ConfigProto(
           allow_soft_placement=True,
           log_device_placement=True,
           device_filters=["/job:ps", "/job:worker/task:%d" % FLAGS.task_index])
 
-#      sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
-
       # The supervisor takes care of session initialization, restoring from
       # a checkpoint, and closing when done or an error occurs.
       #     with sv.managed_session(server.target) as sess:
       # Loop until the supervisor shuts down or 1000000 steps have completed.
       with sv.managed_session(server.target, config=sess_config) as sess:
+#      sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
+#      if True:
           time_begin = time.time()
           local_step = 0
           while not sv.should_stop() and local_step < 10000:
