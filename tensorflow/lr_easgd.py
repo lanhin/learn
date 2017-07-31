@@ -48,7 +48,8 @@ def main(_):
   #      ps_device="/job:ps/cpu:0",
    #     cluster=cluster)):
      with tf.device("job:worker/task:%d" % FLAGS.task_index):
-      global_step = tf.Variable(0, name="global_step", trainable=False)
+#    with tf.device("job:worker/replica:0/task:%d" % FLAGS.task_index):
+      #global_step = tf.Variable(0, name="global_step", trainable=False)
       # Build model...
 
       #Prepare data
@@ -59,8 +60,6 @@ def main(_):
       Y = tf.placeholder('float')
 
       w = tf.Variable(0.0, name = 'weights')
-      with tf.device("/job:ps/cpu:0"):
-          global_w = tf.get_variable('global_weight', [], initializer=tf.constant_initializer(0))
       y_ = model(X, w)
       loss = tf.square(Y - y_)
 
@@ -68,8 +67,14 @@ def main(_):
 #          loss, global_step=global_step)
 
       train_op = tf.train.GradientDescentOptimizer(0.01).minimize(
-          loss, global_step=global_step)
+          loss)
 
+
+      loc_init_op = tf.global_variables_initializer()
+
+      with tf.device("/job:ps/replica:0/task:0/cpu:0"):
+          global_w = tf.get_variable('global_weight', [], initializer=tf.constant_initializer(0))
+          global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
 
       #diff = w - global_w
       varib = alpha*(w-global_w)
@@ -78,18 +83,18 @@ def main(_):
       lvar = w.assign(w-vab)
       gvar_op = global_w.assign(global_w + varib)
       
-      saver = tf.train.Saver()
-      summary_op = tf.summary.merge_all()
+#      saver = tf.train.Saver()
+#      summary_op = tf.summary.merge_all()
       init_op = tf.global_variables_initializer()
 
       # Create a "supervisor", which oversees the training process.
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
-                             logdir="/tmp/train_logs",
-                             init_op=init_op,
-                             summary_op=summary_op,
-                             saver=saver,
-                             global_step=global_step,
-                             save_model_secs=600)
+                               logdir="/tmp/train_logs",
+#                               saver=None,
+                               init_op=init_op,
+                               local_init_op=loc_init_op)
+                               #global_step=global_step,
+                               #save_model_secs=600)
 
       sess_config = tf.ConfigProto(
           allow_soft_placement=True,
@@ -115,16 +120,16 @@ def main(_):
                       _, thevarib = sess.run([gvar_op, varib])
                       #print "thevarib:",thevarib
                       #print "[bf2] w, global_w: "+", ".join(str(e) for e in sess.run([w, global_w]))
-                      _, step = sess.run([train_op, global_step], feed_dict={X:x, Y:y})
+                      sess.run(train_op, feed_dict={X:x, Y:y})
                       #print "[md] w, global_w: "+", ".join(str(e) for e in sess.run([w, global_w]))
                       sess.run(lvar, feed_dict={vab:thevarib})
                       local_step += 1
                       #print "[af] w, global_w: "+", ".join(str(e) for e in sess.run([w, global_w]))
                   else:
-                      _, step = sess.run([train_op, global_step], feed_dict={X:x, Y:y})
+                      sess.run(train_op, feed_dict={X:x, Y:y})
                       local_step += 1
-              print(" Worker %d: training step %d done (global step: %d)" %
-                    (FLAGS.task_index, local_step, step))
+              print(" Worker %d: training step %d done" %
+                    (FLAGS.task_index, local_step))
               #the_loss = sess.run(loss, feed_dict={X:1.0, Y:2.0})
               the_diff = sess.run(global_w)
               the_diff = the_diff-2.0
