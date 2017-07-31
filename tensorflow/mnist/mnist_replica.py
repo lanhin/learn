@@ -191,6 +191,13 @@ def main(unused_argv):
         name="glo_sm_w")
       glo_sm_b = tf.Variable(tf.zeros([10]), name="glo_sm_b")
 
+    def assign_global_vars():
+      return [glo_hid_w.assign(hid_w), glo_hid_b.assign(hid_b), glo_sm_w.assign(sm_w), glo_sm_b.assign(sm_b)]
+
+    def assign_local_vars():
+      return [hid_w.assign(glo_hid_w), hid_b.assign(glo_hid_b), sm_w.assign(glo_sm_w), sm_b.assign(glo_sm_b)]
+
+    
     def update_before_train(alpha, w, global_w):
       varib = alpha*(w-global_w)
       gvar_op = global_w.assign(global_w + varib)
@@ -199,6 +206,9 @@ def main(unused_argv):
     def update_after_train(w, vab):
       return w.assign(w-vab)
 
+    assign_list_local = assign_local_vars()
+    assign_list_global = assign_global_vars()
+    
     before_op_tuple_list = []
     after_op_tuple_list = []
     before_op_tuple_list.append((update_before_train(alpha, hid_w, glo_hid_w)))
@@ -293,6 +303,7 @@ def main(unused_argv):
 
     val_feed = {x: mnist.validation.images, y_: mnist.validation.labels}
     val_xent = sess.run(cross_entropy, feed_dict=val_feed)
+    sess.run(assign_list_local)
     prediction = sess.run(y, feed_dict=val_feed)
     print('Minibatch error: %.1f%%' % error_rate(prediction, mnist.validation.labels))
     print("After %d training step(s), validation cross entropy = %g" %
