@@ -12,6 +12,41 @@ from keras.layers.core import Lambda
 from keras import backend as K
 from keras import regularizers
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]='1'
+#os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+#os.environ["CUDA_VISIBLE_DEVICES"]="0"
+
+flags = tf.app.flags
+flags.DEFINE_string("data_dir", "/tmp/mnist-data",
+                    "Directory for storing mnist data")
+flags.DEFINE_boolean("download_only", False,
+                     "Only perform downloading of data; Do not proceed to "
+                     "session preparation, model definition or training")
+flags.DEFINE_integer("task_index", None,
+                     "Worker task index, should be >= 0. task_index=0 is "
+                     "the master worker task the performs the variable "
+                     "initialization ")
+flags.DEFINE_integer("num_gpus", 0,
+                     "Total number of gpus for each machine."
+                     "If you don't use GPU, please set it to '0'")
+flags.DEFINE_integer("hidden_units", 100,
+                     "Number of units in the hidden layer of the NN")
+flags.DEFINE_integer("train_steps", 1000,
+                     "Number of (global) training steps to perform")
+flags.DEFINE_integer("batch_size", 100, "Training batch size")
+flags.DEFINE_float("learning_rate", 0.01, "Learning rate")
+flags.DEFINE_string("ps_hosts","localhost:2222",
+                    "Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("worker_hosts", "localhost:2223,localhost:2224",
+                    "Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("job_name", None,"job name: worker or ps")
+
+FLAGS = flags.FLAGS
+
+alpha = 0.1
+tau = 1
+
 class cifar10vgg:
     def __init__(self,train=True):
         self.num_classes = 10
@@ -20,6 +55,7 @@ class cifar10vgg:
 
         self.model = self.build_model()
         if train:
+            pass
             self.model = self.train(self.model)
         else:
             self.model.load_weights('cifar10vgg.h5')
@@ -203,6 +239,10 @@ class cifar10vgg:
 
 if __name__ == '__main__':
 
+    if FLAGS.job_name is None or FLAGS.job_name == "":
+        raise ValueError("Must specify an explicit `job_name`")
+    if FLAGS.task_index is None or FLAGS.task_index =="":
+        raise ValueError("Must specify an explicit `task_index`")
 
     (x_train, y_train), (x_test, y_test) = cifar10.load_data()
     x_train = x_train.astype('float32')
@@ -212,6 +252,19 @@ if __name__ == '__main__':
     y_test = keras.utils.to_categorical(y_test, 10)
 
     model = cifar10vgg()
+
+    summary = model.model.summary()
+    print (summary)
+    layer_index = 0
+    for layer in model.model.layers:
+        layer_weights = layer.weights
+        if layer_weights:
+            print ("layer index:", layer_index)
+            for weights in layer_weights:
+#                print (weights)
+                print (weights.name, weights.shape, weights.dtype)
+
+        layer_index += 1
 
     predicted_x = model.predict(x_test)
     residuals = np.argmax(predicted_x,1)!=np.argmax(y_test,1)
