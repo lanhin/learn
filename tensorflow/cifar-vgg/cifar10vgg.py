@@ -12,6 +12,8 @@ from keras.layers.core import Lambda
 from keras import backend as K
 from keras import regularizers
 
+import tensorflow as tf
+import time
 import os
 os.environ["CUDA_VISIBLE_DEVICES"]='1'
 #os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
@@ -182,9 +184,14 @@ class cifar10vgg:
 
         #training parameters
         batch_size = 128
-        maxepoches = 250
+        maxepoches = 4
         learning_rate = 0.1
         lr_decay = 1e-6
+
+        BATCH_SIZE = 128
+        EPOCH_SIZE = 50000
+        NUM_EPOCHS = 3
+        NUM_LABELS = 10
 
         # The data, shuffled and split between train and test sets:
         (x_train, y_train), (x_test, y_test) = cifar10.load_data()
@@ -221,28 +228,32 @@ class cifar10vgg:
 
 
         # training process in a for loop with learning rate drop every 25 epoches.
+        print ("start training...")
+#        K.set_learning_phase(1) # set train phase
+        time_begin = time.time()
+        print("Training begins @ %f" % time_begin)
 
-        for epoch in range(1,maxepoches):
+        for step in xrange(int(NUM_EPOCHS * EPOCH_SIZE) // BATCH_SIZE):
+            offset = (step * BATCH_SIZE) % (EPOCH_SIZE - BATCH_SIZE)
+            x_data = x_train[offset:(offset + BATCH_SIZE), ...]
+            y_data = y_train[offset:(offset + BATCH_SIZE)]
+            #sess.run(train_op, feed_dict={x:x_data, y:y_data})
+            model.train_on_batch(x_data, y_data)
 
-            if epoch%25==0 and epoch>0:
-                lrf/=2
-                sgd = optimizers.SGD(lr=lrf, decay=lr_decay, momentum=0.9, nesterov=True)
-                model.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['accuracy'])
+        time_end = time.time()
+        print("Training ends @ %f" % time_end)
+        training_time = time_end - time_begin
+        print("Training elapsed time: %f s" % training_time)
 
-            historytemp = model.fit_generator(datagen.flow(x_train, y_train,
-                                             batch_size=batch_size),
-                                steps_per_epoch=x_train.shape[0] // batch_size,
-                                epochs=epoch,
-                                validation_data=(x_test, y_test),initial_epoch=epoch-1)
         model.save_weights('cifar10vgg.h5')
         return model
 
 if __name__ == '__main__':
 
-    if FLAGS.job_name is None or FLAGS.job_name == "":
-        raise ValueError("Must specify an explicit `job_name`")
-    if FLAGS.task_index is None or FLAGS.task_index =="":
-        raise ValueError("Must specify an explicit `task_index`")
+#    if FLAGS.job_name is None or FLAGS.job_name == "":
+#        raise ValueError("Must specify an explicit `job_name`")
+#    if FLAGS.task_index is None or FLAGS.task_index =="":
+#        raise ValueError("Must specify an explicit `task_index`")
 
     (x_train, y_train), (x_test, y_test) = cifar10.load_data()
     x_train = x_train.astype('float32')
@@ -252,7 +263,7 @@ if __name__ == '__main__':
     y_test = keras.utils.to_categorical(y_test, 10)
 
     model = cifar10vgg()
-
+    '''
     summary = model.model.summary()
     print (summary)
     layer_index = 0
@@ -265,12 +276,10 @@ if __name__ == '__main__':
                 print (weights.name, weights.shape, weights.dtype)
 
         layer_index += 1
-
+    '''
     predicted_x = model.predict(x_test)
-    residuals = np.argmax(predicted_x,1)!=np.argmax(y_test,1)
+    residuals = np.argmax(predicted_x,1) == np.argmax(y_test,1)
 
-    loss = sum(residuals)/len(residuals)
-    print("the validation 0/1 loss is: ",loss)
-
-
-
+    print (residuals, sum(residuals), len(residuals))
+    loss = 1.0000 * sum(residuals)/len(residuals)
+    print("the validation acc is: ",loss)
