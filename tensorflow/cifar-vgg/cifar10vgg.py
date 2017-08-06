@@ -195,12 +195,12 @@ class cifar10vgg:
         NUM_LABELS = 10
 
         # The data, shuffled and split between train and test sets:
-        (x_train, y_train), (x_test, y_test_orl) = cifar10.load_data()
+        (x_train, y_train_orl), (x_test, y_test_orl) = cifar10.load_data()
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
         x_train, x_test = self.normalize(x_train, x_test)
 
-        y_train = keras.utils.to_categorical(y_train, self.num_classes)
+        y_train = keras.utils.to_categorical(y_train_orl, self.num_classes)
         y_test = keras.utils.to_categorical(y_test_orl, self.num_classes)
 
         lrf = learning_rate
@@ -256,7 +256,8 @@ class cifar10vgg:
             offset = (step * BATCH_SIZE) % (EPOCH_SIZE - BATCH_SIZE)
             x_data = x_train[offset:(offset + BATCH_SIZE), ...]
             y_data = y_train[offset:(offset + BATCH_SIZE)]
-            #sess.run(train_op, feed_dict={x:x_data, y:y_data})
+            y_data_orl = y_train_orl[offset:(offset + BATCH_SIZE)]
+            #sess.run(train_op, feed_dict={x:x_data, y:y_data_orl,K.learning_phase(): 1 })
             model.train_on_batch(x_data, y_data)
 
         time_end = time.time()
@@ -326,9 +327,11 @@ if __name__ == '__main__':
 
         layer_index += 1
     '''
+    '''
     predicted_x = model.predict(x_test)
     residuals = np.argmax(predicted_x,1) == np.argmax(y_test,1)
 
     print (residuals, sum(residuals), len(residuals))
     loss = 1.0000 * sum(residuals)/len(residuals)
     print("the validation acc is: ",loss)
+    '''
