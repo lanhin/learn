@@ -202,6 +202,7 @@ class cifar10vgg:
 
         y_train = keras.utils.to_categorical(y_train_orl, self.num_classes)
         y_test = keras.utils.to_categorical(y_test_orl, self.num_classes)
+        y_train_flt = y_train_orl.ravel()
 
         lrf = learning_rate
 
@@ -239,12 +240,37 @@ class cifar10vgg:
 
         sess = tf.Session()
         K.set_session(sess)
-        #sess.run(init_op)
+        sess.run(init_op)
         
         #optimization details
         sgd = optimizers.SGD(lr=lrf, decay=lr_decay, momentum=0.9, nesterov=True)
         model.compile(loss='categorical_crossentropy', optimizer=sgd,metrics=['accuracy'])
 
+        def predict():
+            size = x_test.shape[0]
+            predictions = np.ndarray(shape=(size, NUM_LABELS), dtype=np.float32)
+            for begin in xrange(0, size, BATCH_SIZE):
+                end = begin + BATCH_SIZE
+                if end <= size:
+                    predictions[begin:end, :] = sess.run(
+                        logits,
+                        feed_dict={x: x_test[begin:end, ...], K.learning_phase(): 0})
+                else:
+                    batch_predictions = sess.run(
+                        logits,
+                        feed_dict={x: x_test[-BATCH_SIZE:, ...], K.learning_phase(): 0})
+                    predictions[begin:, :] = batch_predictions[begin - size:, :]
+
+            correct = 0
+            pred = np.argmax(predictions, 1)
+            for i in range(len(pred)):
+    #            print ("i=", i)
+    #            print ("pred and y_test:", pred[i], y_test[i][0])
+                if pred[i] == y_test_orl[i][0]:
+                    correct += 1
+            acc = (1.0000 * correct / predictions.shape[0])
+
+            print ("acc:", acc)
 
         # training process in a for loop with learning rate drop every 25 epoches.
         print ("start training...")
@@ -256,9 +282,13 @@ class cifar10vgg:
             offset = (step * BATCH_SIZE) % (EPOCH_SIZE - BATCH_SIZE)
             x_data = x_train[offset:(offset + BATCH_SIZE), ...]
             y_data = y_train[offset:(offset + BATCH_SIZE)]
+            y_data_flt = y_train_flt[offset:(offset + BATCH_SIZE)]
             y_data_orl = y_train_orl[offset:(offset + BATCH_SIZE)]
-            #sess.run(train_op, feed_dict={x:x_data, y:y_data_orl,K.learning_phase(): 1 })
+            #print ("y_data, y_data_orl, y_data_flt:", y_data, y_data_orl, y_data_flt)
+            #sess.run(train_op, feed_dict={x:x_data, y:y_data_flt,K.learning_phase(): 1 })
             model.train_on_batch(x_data, y_data)
+            if step > 0 and step % 390 == 0:
+                predict()
 
         time_end = time.time()
         print("Training ends @ %f" % time_end)
@@ -268,32 +298,8 @@ class cifar10vgg:
         model.save_weights('cifar10vgg.h5')
 
         # start test
-        print (K.learning_phase())
-        size = x_test.shape[0]
-        predictions = np.ndarray(shape=(size, NUM_LABELS), dtype=np.float32)
-        for begin in xrange(0, size, BATCH_SIZE):
-            end = begin + BATCH_SIZE
-            if end <= size:
-                predictions[begin:end, :] = sess.run(
-                    logits,
-                    feed_dict={x: x_test[begin:end, ...], K.learning_phase(): 0})
-            else:
-                batch_predictions = sess.run(
-                    logits,
-                    feed_dict={x: x_test[-BATCH_SIZE:, ...], K.learning_phase(): 0})
-                predictions[begin:, :] = batch_predictions[begin - size:, :]
-
-        correct = 0
-        pred = np.argmax(predictions, 1)
-        for i in range(len(pred)):
-#            print ("i=", i)
-#            print ("pred and y_test:", pred[i], y_test[i][0])
-            if pred[i] == y_test_orl[i][0]:
-                correct += 1
-        acc = (1.0000 * correct / predictions.shape[0])
-
-        print ("acc:", acc)
-        
+        #print (K.learning_phase())
+        predict()
         #sess.close()
 
         return model
