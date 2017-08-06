@@ -12,6 +12,7 @@ from keras.layers.core import Lambda
 from keras import backend as K
 from keras import regularizers
 
+import cf10
 import tensorflow as tf
 import time
 import os
@@ -194,17 +195,17 @@ class cifar10vgg:
         NUM_LABELS = 10
 
         # The data, shuffled and split between train and test sets:
-        (x_train, y_train), (x_test, y_test) = cifar10.load_data()
+        (x_train, y_train), (x_test, y_test_orl) = cifar10.load_data()
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
         x_train, x_test = self.normalize(x_train, x_test)
 
         y_train = keras.utils.to_categorical(y_train, self.num_classes)
-        y_test = keras.utils.to_categorical(y_test, self.num_classes)
+        y_test = keras.utils.to_categorical(y_test_orl, self.num_classes)
 
         lrf = learning_rate
 
-
+        '''
         #data augmentation
         datagen = ImageDataGenerator(
             featurewise_center=False,  # set input mean to 0 over the dataset
@@ -219,9 +220,27 @@ class cifar10vgg:
             vertical_flip=False)  # randomly flip images
         # (std, mean, and principal components if ZCA whitening is applied).
         datagen.fit(x_train)
+        '''
+        x = tf.placeholder(tf.float32, shape=(None, 32,32,3))
+        y = tf.placeholder(tf.float32, shape=(None,))
+        logits = model(x)
+        #softout = Activation('softmax')(logits)
+        #cross_entropy2 = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y))
+        #cross_entropy2 = tf.reduce_mean(categorical_crossentropy(y, logits))
+        global_step = tf.contrib.framework.get_or_create_global_step()
+        loss = cf10.loss(logits, y)
+        train_op = cf10.train(loss,global_step)
 
+        #lr = 0.1
+        #opt = tf.train.GradientDescentOptimizer(lrf)
+        #train_op = opt.minimize(cross_entropy2)
 
+        init_op = tf.global_variables_initializer()
 
+        sess = tf.Session()
+        K.set_session(sess)
+        #sess.run(init_op)
+        
         #optimization details
         sgd = optimizers.SGD(lr=lrf, decay=lr_decay, momentum=0.9, nesterov=True)
         model.compile(loss='categorical_crossentropy', optimizer=sgd,metrics=['accuracy'])
@@ -246,6 +265,36 @@ class cifar10vgg:
         print("Training elapsed time: %f s" % training_time)
 
         model.save_weights('cifar10vgg.h5')
+
+        # start test
+        print (K.learning_phase())
+        size = x_test.shape[0]
+        predictions = np.ndarray(shape=(size, NUM_LABELS), dtype=np.float32)
+        for begin in xrange(0, size, BATCH_SIZE):
+            end = begin + BATCH_SIZE
+            if end <= size:
+                predictions[begin:end, :] = sess.run(
+                    logits,
+                    feed_dict={x: x_test[begin:end, ...], K.learning_phase(): 0})
+            else:
+                batch_predictions = sess.run(
+                    logits,
+                    feed_dict={x: x_test[-BATCH_SIZE:, ...], K.learning_phase(): 0})
+                predictions[begin:, :] = batch_predictions[begin - size:, :]
+
+        correct = 0
+        pred = np.argmax(predictions, 1)
+        for i in range(len(pred)):
+#            print ("i=", i)
+#            print ("pred and y_test:", pred[i], y_test[i][0])
+            if pred[i] == y_test_orl[i][0]:
+                correct += 1
+        acc = (1.0000 * correct / predictions.shape[0])
+
+        print ("acc:", acc)
+        
+        #sess.close()
+
         return model
 
 if __name__ == '__main__':
