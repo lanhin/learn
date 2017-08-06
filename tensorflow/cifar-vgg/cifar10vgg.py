@@ -191,7 +191,7 @@ class cifar10vgg:
 
         BATCH_SIZE = 128
         EPOCH_SIZE = 50000
-        NUM_EPOCHS = 3
+        NUM_EPOCHS = 250
         NUM_LABELS = 10
 
         # The data, shuffled and split between train and test sets:
@@ -243,10 +243,10 @@ class cifar10vgg:
         sess.run(init_op)
         
         #optimization details
-        sgd = optimizers.SGD(lr=lrf, decay=lr_decay, momentum=0.9, nesterov=True)
-        model.compile(loss='categorical_crossentropy', optimizer=sgd,metrics=['accuracy'])
+        #sgd = optimizers.SGD(lr=lrf, decay=lr_decay, momentum=0.9, nesterov=True)
+        #model.compile(loss='categorical_crossentropy', optimizer=sgd,metrics=['accuracy'])
 
-        def predict():
+        def predt(x_test, y_test, logits):
             size = x_test.shape[0]
             predictions = np.ndarray(shape=(size, NUM_LABELS), dtype=np.float32)
             for begin in xrange(0, size, BATCH_SIZE):
@@ -266,7 +266,7 @@ class cifar10vgg:
             for i in range(len(pred)):
     #            print ("i=", i)
     #            print ("pred and y_test:", pred[i], y_test[i][0])
-                if pred[i] == y_test_orl[i][0]:
+                if pred[i] == y_test[i][0]:
                     correct += 1
             acc = (1.0000 * correct / predictions.shape[0])
 
@@ -285,10 +285,11 @@ class cifar10vgg:
             y_data_flt = y_train_flt[offset:(offset + BATCH_SIZE)]
             y_data_orl = y_train_orl[offset:(offset + BATCH_SIZE)]
             #print ("y_data, y_data_orl, y_data_flt:", y_data, y_data_orl, y_data_flt)
-            #sess.run(train_op, feed_dict={x:x_data, y:y_data_flt,K.learning_phase(): 1 })
-            model.train_on_batch(x_data, y_data)
+            sess.run(train_op, feed_dict={x:x_data, y:y_data_flt,K.learning_phase(): 1 })
+            #model.train_on_batch(x_data, y_data)
             if step > 0 and step % 390 == 0:
-                predict()
+                print ("loss:", sess.run(loss, feed_dict={x:x_data, y:y_data_flt,K.learning_phase(): 1}), end=' ')
+                predt(x_test, y_test_orl, logits)
 
         time_end = time.time()
         print("Training ends @ %f" % time_end)
@@ -299,7 +300,7 @@ class cifar10vgg:
 
         # start test
         #print (K.learning_phase())
-        predict()
+        predt(x_test, y_test_orl, logits)
         #sess.close()
 
         return model
