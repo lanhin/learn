@@ -54,7 +54,7 @@ tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 390*20,
                             """Number of batches to run.""")
-tf.app.flags.DEFINE_boolean('log_device_placement', False,
+tf.app.flags.DEFINE_boolean('log_device_placement', True,
                             """Whether to log device placement.""")
 tf.app.flags.DEFINE_integer('log_frequency', 30,
                             """How often to log results to the console.""")
@@ -95,15 +95,17 @@ def train():
   # only worker will do train()
   #lanhin end
 
-  with tf.Graph().as_default(), tf.device(tf.train.replica_device_setter(
-      worker_device="/job:worker/task:%d" % FLAGS.task_index,
-      cluster=cluster)):
+  #with tf.Graph().as_default():
+  #with tf.Graph().as_default(), tf.device(tf.train.replica_device_setter(
+  #    worker_device="/job:worker/task:%d" % FLAGS.task_index,
+  #    cluster=cluster)):
+  with tf.device("job:worker/task:%d" % FLAGS.task_index):
     global_step = tf.contrib.framework.get_or_create_global_step()
 
     # Get images and labels for CIFAR-10.
     # Force input pipeline to CPU:0 to avoid operations sometimes ending up on
     # GPU and resulting in a slow down.
-#    with tf.device('/cpu:0'):
+    #with tf.device('/cpu:0'):
     images, labels = cifar10.distorted_inputs()
 
     # Build a Graph that computes the logits predictions from the
@@ -117,10 +119,15 @@ def train():
     # updates the model parameters.
     train_op = cifar10.train(loss, global_step)
 
+    loc_init_op = tf.global_variables_initializer()
+    init_op = tf.global_variables_initializer()
+
+    '''
     class _LoggerHook(tf.train.SessionRunHook):
       """Logs loss and runtime."""
 
       def begin(self):
+        print ("is this a init?")
         self._step = -1
         self._start_time = time.time()
 
@@ -142,24 +149,61 @@ def train():
                         'sec/batch)')
           print (format_str % (datetime.now(), self._step, loss_value,
                                examples_per_sec, sec_per_batch))
+    '''
 
-    with tf.train.MonitoredTrainingSession(
+    #with tf.train.MonitoredTrainingSession(
         # added by lanhin
-        master=server.target,
-        is_chief=(FLAGS.task_index==0),
+    #    master=server.target,
+    #    is_chief=(FLAGS.task_index==0),
         # added by lanhin end
-        checkpoint_dir=FLAGS.train_dir,
-        hooks=[tf.train.StopAtStepHook(last_step=FLAGS.max_steps),
+    #    checkpoint_dir=FLAGS.train_dir,
+    #    hooks=[tf.train.StopAtStepHook(last_step=FLAGS.max_steps),
                #tf.train.NanTensorHook(loss),
-               _LoggerHook()],
-        config=tf.ConfigProto(
-            log_device_placement=FLAGS.log_device_placement)) as mon_sess:
-      time_begin = time.time()
-      while not mon_sess.should_stop():
-        mon_sess.run(train_op)
-      time_end = time.time()
-      training_time = time_end - time_begin
-      print("Training elapsed time: %f s" % training_time)
+    #           _LoggerHook()],
+    #    config=tf.ConfigProto(
+    #        log_device_placement=FLAGS.log_device_placement)) as mon_sess:
+
+    #lanhin start
+    is_chief=(FLAGS.task_index==0),
+    sv = tf.train.Supervisor(
+      is_chief=is_chief,
+      logdir=FLAGS.train_dir,
+      init_op=init_op,
+      local_init_op=loc_init_op,
+      recovery_wait_secs=1)
+    #global_step=global_step)
+
+    sess_config = tf.ConfigProto(
+        allow_soft_placement=True,
+        log_device_placement=True,
+        device_filters=["/job:ps", "/job:worker/task:%d" % FLAGS.task_index])
+
+    # The chief worker (task_index==0) session will prepare the session,
+    # while the remaining workers will wait for the preparation to complete.
+    if is_chief:
+      print("Worker %d: Initializing session..." % FLAGS.task_index)
+    else:
+      print("Worker %d: Waiting for session to be initialized..." %
+            FLAGS.task_index)
+
+    sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
+
+    print("Worker %d: Session initialization complete." % FLAGS.task_index)
+    # lanhin end
+    
+    #sess = tf.Session()
+    #sess.run(init_op)
+    #tf.train.start_queue_runners(sess)
+    time_begin = time.time()
+#    while not mon_sess.should_stop():
+#      mon_sess.run(train_op)
+    for step in range(FLAGS.max_steps):
+      if step % FLAGS.log_frequency == 0:
+        print ("step:", step)
+      sess.run(train_op)
+    time_end = time.time()
+    training_time = time_end - time_begin
+    print("Training elapsed time: %f s" % training_time)
 
 
 
