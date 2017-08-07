@@ -44,15 +44,13 @@ import tensorflow as tf
 import cifar10
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]='0'
-
 
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 390*20,
+tf.app.flags.DEFINE_integer('max_steps', 60,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', True,
                             """Whether to log device placement.""")
@@ -71,6 +69,13 @@ tf.app.flags.DEFINE_string("ps_hosts","localhost:2222",
 tf.app.flags.DEFINE_string("worker_hosts", "localhost:2223,localhost:2224",
                            "Comma-separated list of hostname:port pairs")
 tf.app.flags.DEFINE_string("job_name", None,"job name: worker or ps")
+
+if FLAGS.job_name == "ps": 
+  os.environ["CUDA_VISIBLE_DEVICES"]=''
+elif FLAGS.task_index == 0:
+  os.environ["CUDA_VISIBLE_DEVICES"]='0'
+else:
+  os.environ["CUDA_VISIBLE_DEVICES"]='1'
 #lanhin end
 
 def train():
@@ -120,7 +125,27 @@ def train():
     train_op = cifar10.train(loss, global_step)
 
     loc_init_op = tf.global_variables_initializer()
+
+    # start global variables region
+    '''
+    with tf.device("/job:ps/replica:0/task:0/cpu:0"):
+          # Variables of the hidden layer
+      glo_conv1_kernel = tf.Variable(
+        
+        name="glo_conv1_kernel")
+      glo_conv1_b = tf.Variable(tf.zeros([]), name="glo_hid_b")
+
+      # Variables of the softmax layer
+      glo_sm_w = tf.Variable(
+        tf.truncated_normal(
+          [FLAGS.hidden_units, 10],
+          stddev=1.0 / math.sqrt(FLAGS.hidden_units)),
+        name="glo_sm_w")
+      glo_sm_b = tf.Variable(tf.zeros([10]), name="glo_sm_b")
+    '''
     init_op = tf.global_variables_initializer()
+    
+    # global variables region end
 
     '''
     class _LoggerHook(tf.train.SessionRunHook):
