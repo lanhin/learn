@@ -52,7 +52,7 @@ tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 60,
                             """Number of batches to run.""")
-tf.app.flags.DEFINE_boolean('log_device_placement', True,
+tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 tf.app.flags.DEFINE_integer('log_frequency', 30,
                             """How often to log results to the console.""")
@@ -76,6 +76,8 @@ elif FLAGS.task_index == 0:
   os.environ["CUDA_VISIBLE_DEVICES"]='0'
 else:
   os.environ["CUDA_VISIBLE_DEVICES"]='1'
+
+NUM_CLASSES = cifar10.NUM_CLASSES
 #lanhin end
 
 def train():
@@ -115,7 +117,7 @@ def train():
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    logits = cifar10.inference(images)
+    logits, dim = cifar10.inference(images)
 
     # Calculate loss.
     loss = cifar10.loss(logits, labels)
@@ -127,22 +129,25 @@ def train():
     loc_init_op = tf.global_variables_initializer()
 
     # start global variables region
-    '''
+    
     with tf.device("/job:ps/replica:0/task:0/cpu:0"):
           # Variables of the hidden layer
-      glo_conv1_kernel = tf.Variable(
-        
-        name="glo_conv1_kernel")
-      glo_conv1_b = tf.Variable(tf.zeros([]), name="glo_hid_b")
+      glo_conv1_kernel = tf.Variable(tf.zeros([5, 5, 3, 64]), name="glo_conv1_kernel")
+      glo_conv1_b = tf.Variable(tf.zeros([64]), name="glo_conv1_b")
 
       # Variables of the softmax layer
-      glo_sm_w = tf.Variable(
-        tf.truncated_normal(
-          [FLAGS.hidden_units, 10],
-          stddev=1.0 / math.sqrt(FLAGS.hidden_units)),
-        name="glo_sm_w")
-      glo_sm_b = tf.Variable(tf.zeros([10]), name="glo_sm_b")
-    '''
+      glo_conv2_kernel = tf.Variable(tf.zeros([5, 5, 64, 64]), name="glo_conv2_kernel")
+      glo_conv2_b = tf.Variable(tf.zeros([64]), name="glo_conv2_b")
+
+      glo_local3_w = tf.Variable(tf.zeros([dim, 384]), name="glo_local3_w")
+      glo_local3_b = tf.Variable(tf.zeros([384]), name="glo_local3_b")
+
+      glo_local4_w = tf.Variable(tf.zeros([384, 192]), name="glo_local4_w")
+      glo_local4_b = tf.Variable(tf.zeros([192]), name="glo_local4_b")
+
+      #glo_softmax_w = tf.Variable(tf.zeros([192, NUM_CLASSES]), name="glo_softmax_w")
+      #glo_softmax_b = tf.Variable(tf.zeros([NUM_CLASSES]), name="glo_softmax_b")
+
     init_op = tf.global_variables_initializer()
     
     # global variables region end
@@ -200,7 +205,7 @@ def train():
 
     sess_config = tf.ConfigProto(
         allow_soft_placement=True,
-        log_device_placement=True,
+        log_device_placement=FLAGS.log_device_placement,
         device_filters=["/job:ps", "/job:worker/task:%d" % FLAGS.task_index])
 
     # The chief worker (task_index==0) session will prepare the session,
