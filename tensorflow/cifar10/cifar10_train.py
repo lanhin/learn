@@ -43,16 +43,20 @@ import tensorflow as tf
 
 import cifar10
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]='0'
+
+
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 30,
+tf.app.flags.DEFINE_integer('max_steps', 390*250,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
-tf.app.flags.DEFINE_integer('log_frequency', 10,
+tf.app.flags.DEFINE_integer('log_frequency', 390,
                             """How often to log results to the console.""")
 
 
@@ -111,8 +115,13 @@ def train():
                _LoggerHook()],
         config=tf.ConfigProto(
             log_device_placement=FLAGS.log_device_placement)) as mon_sess:
+      time_begin = time.time()
       while not mon_sess.should_stop():
         mon_sess.run(train_op)
+      time_end = time.time()
+      training_time = time_end - time_begin
+      print("Training elapsed time: %f s" % training_time)
+
 
 
 def main(argv=None):  # pylint: disable=unused-argument
