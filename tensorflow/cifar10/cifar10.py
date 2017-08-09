@@ -194,6 +194,7 @@ def inference(images):
   Returns:
     Logits.
   """
+  var_list=[] # return all variables define in this function
   # We instantiate all variables using tf.get_variable() instead of
   # tf.Variable() in order to share variables across multiple GPU training runs.
   # If we only ran this model on a single GPU, we could simplify this function
@@ -210,6 +211,8 @@ def inference(images):
     pre_activation = tf.nn.bias_add(conv, biases)
     conv1 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv1)
+    var_list.append(kernel)
+    var_list.append(biases)
 
   # pool1
   pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
@@ -229,6 +232,9 @@ def inference(images):
     pre_activation = tf.nn.bias_add(conv, biases)
     conv2 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv2)
+    var_list.append(kernel)
+    var_list.append(biases)
+
 
   # norm2
   norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
@@ -247,6 +253,9 @@ def inference(images):
     biases = _variable_on_cpu('biases', [384], tf.constant_initializer(0.1))
     local3 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
     _activation_summary(local3)
+    var_list.append(weights)
+    var_list.append(biases)
+
 
   # local4
   with tf.variable_scope('local4') as scope:
@@ -255,6 +264,9 @@ def inference(images):
     biases = _variable_on_cpu('biases', [192], tf.constant_initializer(0.1))
     local4 = tf.nn.relu(tf.matmul(local3, weights) + biases, name=scope.name)
     _activation_summary(local4)
+    var_list.append(weights)
+    var_list.append(biases)
+
 
   # linear layer(WX + b),
   # We don't apply softmax here because
@@ -267,8 +279,11 @@ def inference(images):
                               tf.constant_initializer(0.0))
     softmax_linear = tf.add(tf.matmul(local4, weights), biases, name=scope.name)
     _activation_summary(softmax_linear)
+    var_list.append(weights)
+    var_list.append(biases)
 
-  return softmax_linear, dim  # return dim, for global variable use  lanhin
+
+  return softmax_linear, var_list  # return var_list, for global variable use  lanhin
 
 
 def loss(logits, labels):

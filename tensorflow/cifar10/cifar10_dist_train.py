@@ -77,7 +77,7 @@ elif FLAGS.task_index == 0:
 else:
   os.environ["CUDA_VISIBLE_DEVICES"]='1'
 
-NUM_CLASSES = cifar10.NUM_CLASSES
+alpha = 0.1
 #lanhin end
 
 def train():
@@ -117,7 +117,7 @@ def train():
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    logits, dim = cifar10.inference(images)
+    logits, local_var_list = cifar10.inference(images)
 
     # Calculate loss.
     loss = cifar10.loss(logits, labels)
@@ -129,24 +129,38 @@ def train():
     loc_init_op = tf.global_variables_initializer()
 
     # start global variables region
-    
+    global_var_list = []
     with tf.device("/job:ps/replica:0/task:0/cpu:0"):
-          # Variables of the hidden layer
-      glo_conv1_kernel = tf.Variable(tf.zeros([5, 5, 3, 64]), name="glo_conv1_kernel")
-      glo_conv1_b = tf.Variable(tf.zeros([64]), name="glo_conv1_b")
+      var_index = 0
+      for var in local_var_list:
+        var_index += 1
+        global_var_list.append(tf.Variable(tf.zeros(var.shape), name="glo_var"+str(var_index)))
 
-      # Variables of the softmax layer
-      glo_conv2_kernel = tf.Variable(tf.zeros([5, 5, 64, 64]), name="glo_conv2_kernel")
-      glo_conv2_b = tf.Variable(tf.zeros([64]), name="glo_conv2_b")
+    def assign_global_vars():
+      return [gvar.assign(lvar) for (gvar, lvar) in zip(global_var_list, local_var_list)]
+    
+    def assign_local_vars():
+      return [lvar.assign(gvar) for (gvar, lvar) in zip(global_var_list, local_var_list)]
 
-      glo_local3_w = tf.Variable(tf.zeros([dim, 384]), name="glo_local3_w")
-      glo_local3_b = tf.Variable(tf.zeros([384]), name="glo_local3_b")
+    def update_before_train(alpha, w, global_w):
+      varib = alpha*(w-global_w)
+      gvar_op = global_w.assign(global_w + varib)
+      return gvar_op, varib
+      
+    def update_after_train(w, vab):
+      return w.assign(w-vab)
 
-      glo_local4_w = tf.Variable(tf.zeros([384, 192]), name="glo_local4_w")
-      glo_local4_b = tf.Variable(tf.zeros([192]), name="glo_local4_b")
+    assign_list_local = assign_local_vars()
+    assign_list_global = assign_global_vars()
 
-      #glo_softmax_w = tf.Variable(tf.zeros([192, NUM_CLASSES]), name="glo_softmax_w")
-      #glo_softmax_b = tf.Variable(tf.zeros([NUM_CLASSES]), name="glo_softmax_b")
+    before_op_tuple_list = []
+    after_op_tuple_list = []
+    vbholder_list = []
+    for (gvar, lvar) in zip(global_var_list, local_var_list):
+      before_op_tuple_list.append((update_before_train(alpha, lvar, gvar)))
+    for var in local_var_list:
+      vbholder_list.append(tf.placeholder("float", var.shape))
+      after_op_tuple_list.append((update_after_train(var, vbholder_list[-1]), vbholder_list[-1]))
 
     init_op = tf.global_variables_initializer()
     
