@@ -39,6 +39,7 @@ from __future__ import print_function
 
 import math
 import sys
+import os
 import tempfile
 import time
 import numpy
@@ -62,23 +63,30 @@ flags.DEFINE_integer("num_gpus", 0,
                      "If you don't use GPU, please set it to '0'")
 flags.DEFINE_integer("hidden_units", 100,
                      "Number of units in the hidden layer of the NN")
-flags.DEFINE_integer("train_steps", 1000,
+flags.DEFINE_integer("train_steps", 10000,
                      "Number of (global) training steps to perform")
-flags.DEFINE_integer("batch_size", 100, "Training batch size")
+flags.DEFINE_integer("batch_size", 128, "Training batch size")
 flags.DEFINE_float("learning_rate", 0.01, "Learning rate")
 flags.DEFINE_string("ps_hosts","localhost:2222",
                     "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("worker_hosts", "localhost:2223,localhost:2224",
                     "Comma-separated list of hostname:port pairs")
 flags.DEFINE_string("job_name", None,"job name: worker or ps")
+flags.DEFINE_integer("tau", 2, "The Tau value")
 
 FLAGS = flags.FLAGS
 
+if FLAGS.job_name == "ps": 
+  os.environ["CUDA_VISIBLE_DEVICES"]=''
+elif FLAGS.task_index == 0:
+  os.environ["CUDA_VISIBLE_DEVICES"]='0'
+else:
+  os.environ["CUDA_VISIBLE_DEVICES"]='1'
 
 IMAGE_PIXELS = 28
 
 alpha = 0.1
-tau = 1
+#tau = 1
 
 def main(unused_argv):
   mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot=True)
@@ -256,12 +264,13 @@ def main(unused_argv):
     print("Training begins @ %f" % time_begin)
 
     local_step = 0
+    tau = FLAGS.tau
     while True:
       # Training feed
       batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size)
       train_feed = {x: batch_xs, y_: batch_ys}
       if local_step % tau == 0:
-        print ("Update weights...")
+        #print ("Update weights...")
         thevarib_list = []
         for i in range(0, len(before_op_tuple_list)):
           (gvar_op, varib) = before_op_tuple_list[i]
@@ -278,9 +287,9 @@ def main(unused_argv):
           sess.run(train_step, feed_dict=train_feed)
       local_step += 1
 
-      now = time.time()
-      print("%f: Worker %d: training step %d done" %
-            (now, FLAGS.task_index, local_step))
+      #now = time.time()
+      #print("%f: Worker %d: training step %d done" %
+      #      (now, FLAGS.task_index, local_step))
 
       if local_step >= FLAGS.train_steps:
         break
