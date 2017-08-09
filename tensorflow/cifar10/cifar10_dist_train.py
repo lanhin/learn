@@ -69,6 +69,7 @@ tf.app.flags.DEFINE_string("ps_hosts","localhost:2222",
 tf.app.flags.DEFINE_string("worker_hosts", "localhost:2223,localhost:2224",
                            "Comma-separated list of hostname:port pairs")
 tf.app.flags.DEFINE_string("job_name", None,"job name: worker or ps")
+tf.app.flags.DEFINE_integer("tau", 2, "The Tau value")
 
 if FLAGS.job_name == "ps": 
   os.environ["CUDA_VISIBLE_DEVICES"]=''
@@ -244,7 +245,21 @@ def train():
     for step in range(FLAGS.max_steps):
       if step % FLAGS.log_frequency == 0:
         print ("step:", step)
-      sess.run(train_op)
+      if step % FLAGS.tau == 0 and step > 0: # update global weights
+        thevarib_list = []
+        for i in range(0, len(before_op_tuple_list)):
+          (gvar_op, varib) = before_op_tuple_list[i]
+          _, thevarib = sess.run([gvar_op, varib])
+          thevarib_list.append(thevarib)
+
+        sess.run(train_op)
+
+        for i in range(0, len(after_op_tuple_list)):
+          (lvar_op, thevaribHolder) = after_op_tuple_list[i]
+          sess.run(lvar_op, feed_dict={thevaribHolder: thevarib_list[i]})
+
+      else:
+        sess.run(train_op)
     time_end = time.time()
     training_time = time_end - time_begin
     print("Training elapsed time: %f s" % training_time)
