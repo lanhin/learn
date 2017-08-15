@@ -40,11 +40,12 @@ from datetime import datetime
 import time
 
 import tensorflow as tf
+from tensorflow.python.client import timeline
 
 import cifar10
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]='0'
+#os.environ["CUDA_VISIBLE_DEVICES"]='0'
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -52,7 +53,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 60,
+tf.app.flags.DEFINE_integer('max_steps', 390,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
@@ -69,7 +70,8 @@ def train():
     # Force input pipeline to CPU:0 to avoid operations sometimes ending up on
     # GPU and resulting in a slow down.
     with tf.device('/cpu:0'):
-      images, labels = cifar10.distorted_inputs()
+#      images, labels = cifar10.distorted_inputs()
+      images, labels = cifar10.inputs(False)
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
@@ -115,13 +117,19 @@ def train():
                _LoggerHook()],
         config=tf.ConfigProto(
             log_device_placement=FLAGS.log_device_placement)) as mon_sess:
+      f = open('tl.json', 'w')
+      run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+      run_metadata = tf.RunMetadata()
       time_begin = time.time()
       while not mon_sess.should_stop():
-        mon_sess.run(train_op)
+        mon_sess.run(train_op)#, options=run_options, run_metadata=run_metadata)
+#        tl = timeline.Timeline(run_metadata.step_stats)
+ #       ctf = tl.generate_chrome_trace_format()
+  #    f.write(ctf)
       time_end = time.time()
       training_time = time_end - time_begin
       print("Training elapsed time: %f s" % training_time)
-
+      f.close()
 
 
 def main(argv=None):  # pylint: disable=unused-argument
