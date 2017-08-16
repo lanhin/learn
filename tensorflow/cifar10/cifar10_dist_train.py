@@ -40,6 +40,8 @@ from datetime import datetime
 import time
 
 import tensorflow as tf
+from keras import datasets as dset
+import numpy as np
 
 import cifar10
 
@@ -50,7 +52,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 60,
+tf.app.flags.DEFINE_integer('max_steps', 390,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
@@ -79,7 +81,53 @@ else:
   os.environ["CUDA_VISIBLE_DEVICES"]='1'
 
 alpha = 0.1
+
+EPOCH_SIZE = cifar10.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
+NUM_LABELS = cifar10.NUM_CLASSES
+
 #lanhin end
+
+def normalize(X_train,X_test):
+    #this function normalize inputs for zero mean and unit variance
+    # it is used when training a model.
+    # Input: training set and test set
+    # Output: normalized training set and test set according to the trianing set statistics.
+    mean = np.mean(X_train,axis=(0,1,2,3))
+    std = np.std(X_train, axis=(0, 1, 2, 3))
+    X_train = (X_train-mean)/(std+1e-7)
+    X_test = (X_test-mean)/(std+1e-7)
+    return X_train, X_test
+
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    return np.exp(x) / np.sum(np.exp(x), axis=0)
+
+def predt(sess, x_test, y_test, logits, x, y):
+    size = x_test.shape[0]
+    predictions = np.ndarray(shape=(size, NUM_LABELS), dtype=np.float32)
+    for begin in xrange(0, size, FLAGS.batch_size):
+        end = begin + FLAGS.batch_size
+        if end <= size:
+            predictions[begin:end, :] = sess.run(
+                logits,
+                feed_dict={x: x_test[begin:end, ...], y: y_test[begin:end]})
+        else:
+            batch_predictions = sess.run(
+                logits,
+                feed_dict={x: x_test[-FLAGS.batch_size:, ...], y: y_test[-FLAGS.batch_size:]})
+            predictions[begin:, :] = batch_predictions[begin - size:, :]
+
+    correct = 0
+    pred = []
+    for item in predictions:
+      pred.append(np.argmax(softmax(item)))
+    for i in range(len(pred)):
+#            print ("i=", i)
+#            print ("pred and y_test:", pred[i], y_test[i][0])
+        if pred[i] == y_test[i]:
+            correct += 1
+    acc = (1.0000 * correct / predictions.shape[0])
+    print ("acc:", acc)
 
 def train():
   """Train CIFAR-10 for a number of steps."""
@@ -104,6 +152,8 @@ def train():
   #lanhin end
 
   #with tf.Graph().as_default():
+  
+  # Use comment to choose which way of tf.device() you want to use
   #with tf.Graph().as_default(), tf.device(tf.train.replica_device_setter(
   #    worker_device="/job:worker/task:%d" % FLAGS.task_index,
   #    cluster=cluster)):
@@ -116,12 +166,27 @@ def train():
     #with tf.device('/cpu:0'):
     images, labels = cifar10.distorted_inputs()
 
+    (x_train, y_train_orl), (x_test, y_test_orl) = dset.cifar10.load_data()
+    x_train = x_train.astype('float32')
+    x_test = x_test.astype('float32')
+    x_train, x_test = normalize(x_train, x_test)
+
+    y_train_orl = y_train_orl.astype('int32')
+    y_test_orl = y_test_orl.astype('int32')
+    y_train_flt = y_train_orl.ravel()
+    y_test_flt = y_test_orl.ravel()
+
+    x = tf.placeholder(tf.float32, shape=(FLAGS.batch_size, 32,32,3))
+    y = tf.placeholder(tf.int32, shape=(FLAGS.batch_size,))
+
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    logits, local_var_list = cifar10.inference(images)
+    #logits, local_var_list = cifar10.inference(images)
+    logits, local_var_list = cifar10.inference(x)
 
     # Calculate loss.
-    loss = cifar10.loss(logits, labels)
+    #loss = cifar10.loss(logits, labels)
+    loss = cifar10.loss(logits, y)
 
     # Build a Graph that trains the model with one batch of examples and
     # updates the model parameters.
@@ -243,6 +308,10 @@ def train():
 #    while not mon_sess.should_stop():
 #      mon_sess.run(train_op)
     for step in range(FLAGS.max_steps):
+      offset = (step * FLAGS.batch_size) % (EPOCH_SIZE - FLAGS.batch_size)
+      x_data = x_train[offset:(offset + FLAGS.batch_size), ...]
+      y_data_flt = y_train_flt[offset:(offset + FLAGS.batch_size)]
+
       if step % FLAGS.log_frequency == 0:
         print ("step:", step)
       if step % FLAGS.tau == 0 and step > 0: # update global weights
@@ -252,19 +321,18 @@ def train():
           _, thevarib = sess.run([gvar_op, varib])
           thevarib_list.append(thevarib)
 
-        sess.run(train_op)
+        sess.run(train_op, feed_dict={x:x_data, y:y_data_flt})
 
         for i in range(0, len(after_op_tuple_list)):
           (lvar_op, thevaribHolder) = after_op_tuple_list[i]
           sess.run(lvar_op, feed_dict={thevaribHolder: thevarib_list[i]})
 
       else:
-        sess.run(train_op)
+        sess.run(train_op, feed_dict={x:x_data, y:y_data_flt})
     time_end = time.time()
     training_time = time_end - time_begin
     print("Training elapsed time: %f s" % training_time)
-
-
+    predt(sess, x_test, y_test_flt, logits, x, y)
 
 def main(argv=None):  # pylint: disable=unused-argument
   cifar10.maybe_download_and_extract()
