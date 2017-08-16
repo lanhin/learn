@@ -40,6 +40,7 @@ from datetime import datetime
 import time
 
 import tensorflow as tf
+from tensorflow.python.client import timeline
 from keras import datasets as dset
 import numpy as np
 
@@ -149,6 +150,10 @@ def train():
   if FLAGS.job_name == "ps":
     server.join()
   # only worker will do train()
+  is_chief = False
+  if FLAGS.task_index == 0:
+    is_chief = True
+
   #lanhin end
 
   #with tf.Graph().as_default():
@@ -192,11 +197,20 @@ def train():
     # updates the model parameters.
     train_op = cifar10.train(loss, global_step)
 
-    loc_init_op = tf.global_variables_initializer()
+    # the non chief workers get local var init_op here
+    if not is_chief:
+      init_op = tf.global_variables_initializer()
+    else:
+      init_op = None
 
     # start global variables region
     global_var_list = []
     with tf.device("/job:ps/replica:0/task:0/cpu:0"):
+      # barrier var
+      finished = tf.get_variable("worker_finished",[],tf.int32,tf.zeros_initializer(tf.int32),trainable=False)                    
+      with finished.graph.colocate_with(finished):
+        finish_op = finished.assign_add(1,use_locking=True)
+
       var_index = 0
       for var in local_var_list:
         var_index += 1
@@ -228,7 +242,9 @@ def train():
       vbholder_list.append(tf.placeholder("float", var.shape))
       after_op_tuple_list.append((update_after_train(var, vbholder_list[-1]), vbholder_list[-1]))
 
-    init_op = tf.global_variables_initializer()
+    # the chief worker get global var init op here
+    if is_chief:
+      init_op = tf.global_variables_initializer()
     
     # global variables region end
 
@@ -274,12 +290,11 @@ def train():
     #        log_device_placement=FLAGS.log_device_placement)) as mon_sess:
 
     #lanhin start
-    is_chief=(FLAGS.task_index==0),
     sv = tf.train.Supervisor(
-      is_chief=is_chief,
+      is_chief=True,#is_chief,
       logdir=FLAGS.train_dir,
       init_op=init_op,
-      local_init_op=loc_init_op,
+      #local_init_op=loc_init_op,
       recovery_wait_secs=1)
     #global_step=global_step)
 
@@ -298,12 +313,27 @@ def train():
 
     sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
 
+    if is_chief:
+      sess.run(assign_list_global)
+      barrier_finished = sess.run(finish_op)
+      print ("barrier_finished:", barrier_finished)
+    else:
+      barrier_finished = sess.run(finished)
+      print ("barrier_finished:", barrier_finished)
+      while barrier_finished <= 0:
+        time.sleep(1)
+        barrier_finished = sess.run(finished)
+      sess.run(assign_list_local)
     print("Worker %d: Session initialization complete." % FLAGS.task_index)
-    # lanhin end
+      # lanhin end
     
     #sess = tf.Session()
     #sess.run(init_op)
     #tf.train.start_queue_runners(sess)
+    f = open('tl_dist.json', 'w')
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+
     time_begin = time.time()
 #    while not mon_sess.should_stop():
 #      mon_sess.run(train_op)
@@ -328,10 +358,14 @@ def train():
           sess.run(lvar_op, feed_dict={thevaribHolder: thevarib_list[i]})
 
       else:
-        sess.run(train_op, feed_dict={x:x_data, y:y_data_flt})
+        sess.run(train_op, feed_dict={x:x_data, y:y_data_flt})#, options=run_options, run_metadata=run_metadata)
+        #tl = timeline.Timeline(run_metadata.step_stats)
+        #ctf = tl.generate_chrome_trace_format()
+    #f.write(ctf)
     time_end = time.time()
     training_time = time_end - time_begin
     print("Training elapsed time: %f s" % training_time)
+    f.close()
     predt(sess, x_test, y_test_flt, logits, x, y)
 
 def main(argv=None):  # pylint: disable=unused-argument
