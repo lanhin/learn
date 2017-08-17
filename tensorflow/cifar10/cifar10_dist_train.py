@@ -53,7 +53,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 390,
+tf.app.flags.DEFINE_integer('max_steps', 390*100,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
@@ -76,10 +76,10 @@ tf.app.flags.DEFINE_integer("tau", 2, "The Tau value")
 
 if FLAGS.job_name == "ps": 
   os.environ["CUDA_VISIBLE_DEVICES"]=''
-elif FLAGS.task_index == 0:
-  os.environ["CUDA_VISIBLE_DEVICES"]='0'
-else:
-  os.environ["CUDA_VISIBLE_DEVICES"]='1'
+#elif FLAGS.task_index == 0:
+#  os.environ["CUDA_VISIBLE_DEVICES"]='0'
+#else:
+#  os.environ["CUDA_VISIBLE_DEVICES"]='1'
 
 alpha = 0.1
 
@@ -101,7 +101,9 @@ def normalize(X_train,X_test):
 
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
-    return np.exp(x) / np.sum(np.exp(x), axis=0)
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()  # may this can fix the exp() overflow problem.  --lanhin
+    #return np.exp(x) / np.sum(np.exp(x), axis=0)
 
 def predt(sess, x_test, y_test, logits, x, y):
     size = x_test.shape[0]
@@ -343,7 +345,9 @@ def train():
       y_data_flt = y_train_flt[offset:(offset + FLAGS.batch_size)]
 
       if step % FLAGS.log_frequency == 0:
-        print ("step:", step)
+        print ("step:", step, end=' ')
+        #sess.run(assign_list_local)
+        predt(sess, x_test, y_test_flt, logits, x, y)
       if step % FLAGS.tau == 0 and step > 0: # update global weights
         thevarib_list = []
         for i in range(0, len(before_op_tuple_list)):
@@ -366,6 +370,7 @@ def train():
     training_time = time_end - time_begin
     print("Training elapsed time: %f s" % training_time)
     f.close()
+    sess.run(assign_list_local)
     predt(sess, x_test, y_test_flt, logits, x, y)
 
 def main(argv=None):  # pylint: disable=unused-argument
