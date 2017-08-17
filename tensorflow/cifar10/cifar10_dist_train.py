@@ -53,7 +53,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/cifar10_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 390*100,
+tf.app.flags.DEFINE_integer('max_steps', 390*250,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
@@ -199,6 +199,13 @@ def train():
     # updates the model parameters.
     train_op = cifar10.train(loss, global_step)
 
+    # the temp var part, for performance testing
+    tmp_var_list = []
+    var_index = 0
+    for var in local_var_list:
+      var_index += 1
+      tmp_var_list.append(tf.Variable(tf.zeros(var.shape), name="tmp_var"+str(var_index)))
+
     # the non chief workers get local var init_op here
     if not is_chief:
       init_op = tf.global_variables_initializer()
@@ -218,11 +225,17 @@ def train():
         var_index += 1
         global_var_list.append(tf.Variable(tf.zeros(var.shape), name="glo_var"+str(var_index)))
 
-    def assign_global_vars():
+    def assign_global_vars(): # assign local vars' values to global vars
       return [gvar.assign(lvar) for (gvar, lvar) in zip(global_var_list, local_var_list)]
     
-    def assign_local_vars():
+    def assign_local_vars(): # assign global vars' values to local vars
       return [lvar.assign(gvar) for (gvar, lvar) in zip(global_var_list, local_var_list)]
+
+    def assign_tmp_vars(): # assign local vars' values to tmp vars
+      return [tvar.assign(lvar) for (tvar, lvar) in zip(tmp_var_list, local_var_list)]
+
+    def assign_local_vars_from_tmp(): # assign tmp vars' values to local vars
+      return [lvar.assign(tvar) for (tvar, lvar) in zip(tmp_var_list, local_var_list)]
 
     def update_before_train(alpha, w, global_w):
       varib = alpha*(w-global_w)
@@ -234,6 +247,8 @@ def train():
 
     assign_list_local = assign_local_vars()
     assign_list_global = assign_global_vars()
+    assign_list_loc2tmp = assign_tmp_vars()
+    assign_list_tmp2loc = assign_local_vars_from_tmp()
 
     before_op_tuple_list = []
     after_op_tuple_list = []
@@ -279,12 +294,12 @@ def train():
       barrier_finished = sess.run(finish_op)
       print ("barrier_finished:", barrier_finished)
     else:
-      barrier_finished = sess.run(finished)
+      barrier_finished = sess.run(finish_op)
       print ("barrier_finished:", barrier_finished)
-      while barrier_finished <= 0:
-        time.sleep(1)
-        barrier_finished = sess.run(finished)
-      sess.run(assign_list_local)
+    while barrier_finished < num_workers:
+      time.sleep(1)
+      barrier_finished = sess.run(finished)
+    sess.run(assign_list_local)
     print("Worker %d: Session initialization complete." % FLAGS.task_index)
       # lanhin end
     
@@ -304,9 +319,14 @@ def train():
       y_data_flt = y_train_flt[offset:(offset + FLAGS.batch_size)]
 
       if step % FLAGS.log_frequency == 0:
-        print ("step:", step, end=' ')
-        #sess.run(assign_list_local)
+        time_step = time.time()
+        steps_time = time_step - time_begin
+        print ("step:", step, " steps time:", steps_time, end='  ')
+        sess.run(assign_list_loc2tmp)
+        sess.run(assign_list_local)
         predt(sess, x_test, y_test_flt, logits, x, y)
+        sess.run(assign_list_tmp2loc)
+        time_begin = time.time()
       if step % FLAGS.tau == 0 and step > 0: # update global weights
         thevarib_list = []
         for i in range(0, len(before_op_tuple_list)):
